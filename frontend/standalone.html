@@ -767,6 +767,29 @@ function App() {
   const [busy, setBusy] = React.useState(false);
   const [err, setErr] = React.useState("");
   const [pro, setPro] = React.useState(zenIsPro());
+  // CVR-132: ペイウォール表示状態・決済開始状態をReact stateで管理する。
+  // window.zenShowPaywall()（IIFE側、analyze()内および他アプリ共通の
+  // 呼び出し規約）は本コンポーネントがwindow.zenPaywallListenersに登録
+  // したリスナー経由でsetShowPaywallModal(true)を呼ぶブリッジになっている。
+  const [showPaywallModal, setShowPaywallModal] = React.useState(false);
+  const [checkoutStarted, setCheckoutStarted] = React.useState(false);
+  React.useEffect(() => {
+    const listener = () => { setCheckoutStarted(false); setShowPaywallModal(true); };
+    window.zenPaywallListeners.push(listener);
+    return () => {
+      const idx = window.zenPaywallListeners.indexOf(listener);
+      if (idx >= 0) window.zenPaywallListeners.splice(idx, 1);
+    };
+  }, []);
+  const handlePaywallBuy = () => {
+    // CVR-014: 二重クリック・離脱防止のためのローディング状態。
+    // checkout_started dataLayerイベント送信とZEN_SLUG参照はIIFEローカル
+    // スコープのwindow.zenStartCheckout()内で完結しているため、ここでは
+    // 呼ぶだけでよい。
+    setCheckoutStarted(true);
+    window.zenStartCheckout();
+  };
+  const handlePaywallClose = () => setShowPaywallModal(false);
   const upd = (i, k, v) => setSites(s => s.map((x, j) => j === i ? {
     ...x,
     [k]: v
@@ -991,7 +1014,11 @@ function App() {
     className: "sub"
   }, "\u5168\u56E0\u5B50\u3067\u7AF6\u5408\u4EE5\u4E0A\u3067\u3059\u3002\u2461\u306E\u4F38\u3073\u3057\u308D\u3092\u57CB\u3081\u3066\u6E80\u70B9(100)\u3092\u76EE\u6307\u3057\u307E\u3057\u3087\u3046\u3002")), /*#__PURE__*/React.createElement("p", {
     className: "note"
-  }, "\u203B\u5B9F\u30DA\u30FC\u30B8\u53D6\u5F97\u306F r.jina.ai \u7D4C\u7531\u306E\u7C21\u6613\u89E3\u6790\uFF08\u672C\u6587\u62BD\u51FA\u306E\u305F\u3081\u4E00\u90E8\u306E\u8868/\u88C5\u98FE\u306F\u7C21\u7565\u5316\uFF09\u3002\u69CB\u9020\u30B9\u30B3\u30A2\u306F\u5B9F\u6E2C\u3001\u56E0\u5B50\u91CD\u307F\u306F\u5F53\u793E\u30D2\u30E5\u30FC\u30EA\u30B9\u30C6\u30A3\u30C3\u30AF\u3002\u5B9F\u969B\u306EAI\u5F15\u7528\u53EF\u5426\u306FPoC\u3067\u691C\u8A3C\u3057\u3066\u304F\u3060\u3055\u3044\u3002"));
+  }, "\u203B\u5B9F\u30DA\u30FC\u30B8\u53D6\u5F97\u306F r.jina.ai \u7D4C\u7531\u306E\u7C21\u6613\u89E3\u6790\uFF08\u672C\u6587\u62BD\u51FA\u306E\u305F\u3081\u4E00\u90E8\u306E\u8868/\u88C5\u98FE\u306F\u7C21\u7565\u5316\uFF09\u3002\u69CB\u9020\u30B9\u30B3\u30A2\u306F\u5B9F\u6E2C\u3001\u56E0\u5B50\u91CD\u307F\u306F\u5F53\u793E\u30D2\u30E5\u30FC\u30EA\u30B9\u30C6\u30A3\u30C3\u30AF\u3002\u5B9F\u969B\u306EAI\u5F15\u7528\u53EF\u5426\u306FPoC\u3067\u691C\u8A3C\u3057\u3066\u304F\u3060\u3055\u3044\u3002"), showPaywallModal && /*#__PURE__*/React.createElement(window.ZenPaywallModal, {
+    onClose: handlePaywallClose,
+    onBuy: handlePaywallBuy,
+    checkoutStarted: checkoutStarted
+  }));
 }
 function ActionBar() {
   const [msg, setMsg] = React.useState("");
@@ -1711,6 +1738,117 @@ function ShareBar() {
   // ダッシュボード側設定で有効化できる（Stripeダッシュボード → この決済リンクの
   // 編集 → 支払い方法 → Apple Pay/Google Payを有効化）。コード変更は不要。
 
+  // CVR-132: zenShowPaywall()のinnerHTML組み立て方式をReactコンポーネント
+  // <ZenPaywallModal/>に置き換える。ボタンのローディング状態・エラー表示を
+  // React stateで管理し、DOM直接操作（innerHTML）由来の不整合（二重登録・
+  // イベントリスナーの手動解除漏れ等）のリスクを減らす。
+  // このアプリはJSXソースを持たず、ビルド済みのReact.createElement形式で
+  // 配信されている（standalone.html自体が唯一の実体）ため、他のIIFE内関数
+  // と同じスタイル（プレーンJS、createElement手書き）で統一する。
+  // IIFEローカルのZEN_*定数に直接アクセスできるようにするため、このIIFE内
+  // でコンポーネントを定義しwindowへ公開する（App()側はIIFEより先に定義
+  // されており、ZEN_*変数への静的スコープ参照ができないため）。
+  window.ZenPaywallModal = function (props) {
+    var onClose = props.onClose;
+    var onBuy = props.onBuy;
+    var usedCount = zenState().used;
+    var e = React.createElement;
+
+    var featureItems = ZEN_PRO_FEATURES.map(function (f, i) {
+      return e('li', { key: i }, '✅ ' + f);
+    });
+
+    React.useEffect(function () {
+      var previousBodyOverflow = document.body.style.overflow;
+      document.body.style.overflow = 'hidden';
+      var blockScroll = function (evt) { evt.preventDefault(); };
+      document.addEventListener('wheel', blockScroll, { passive: false });
+      document.addEventListener('touchmove', blockScroll, { passive: false });
+      window.scrollTo(0, 0);
+      window.dataLayer = window.dataLayer || [];
+      window.dataLayer.push({ event: 'paywall_shown', slug: ZEN_SLUG });
+
+      var onKeydown = function (evt) {
+        if (evt.key === 'Escape') { onClose(); return; }
+        if (evt.key === 'Tab') {
+          evt.preventDefault();
+          var buyBtn = document.getElementById('zen-paywall-buy');
+          var closeBtn = document.getElementById('zen-paywall-close');
+          var active = document.activeElement;
+          (active === buyBtn ? closeBtn : buyBtn).focus();
+        }
+      };
+      document.addEventListener('keydown', onKeydown);
+      var buyBtnEl = document.getElementById('zen-paywall-buy');
+      if (buyBtnEl) buyBtnEl.focus();
+
+      return function () {
+        document.body.style.overflow = previousBodyOverflow;
+        document.removeEventListener('wheel', blockScroll);
+        document.removeEventListener('touchmove', blockScroll);
+        document.removeEventListener('keydown', onKeydown);
+      };
+    }, []);
+
+    var handleClose = function () {
+      try {
+        var log = JSON.parse(localStorage.getItem('zen-paywall-dismiss-log') || '[]');
+        log.push({ slug: ZEN_SLUG, at: new Date().toISOString() });
+        localStorage.setItem('zen-paywall-dismiss-log', JSON.stringify(log));
+      } catch (err) {}
+      onClose();
+    };
+
+    var handleOverlayClick = function (evt) {
+      if (evt.target === evt.currentTarget) handleClose();
+    };
+
+    if (!document.getElementById('zen-modal-anim-style')) {
+      var animStyle = document.createElement('style');
+      animStyle.id = 'zen-modal-anim-style';
+      animStyle.textContent = '@keyframes zenModalIn{from{opacity:0;transform:scale(.94)}to{opacity:1;transform:scale(1)}}';
+      document.head.appendChild(animStyle);
+    }
+
+    return e('div', {
+      id: 'zen-paywall-modal',
+      style: { position: 'fixed', inset: 0, background: 'rgba(0,0,0,.75)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 99999, fontFamily: 'sans-serif' },
+      onClick: handleOverlayClick,
+    },
+      e('div', {
+        style: { background: '#fff', borderRadius: 16, padding: '32px 28px', maxWidth: 380, width: '90%', textAlign: 'center', boxShadow: '0 20px 60px rgba(0,0,0,.3)', animation: 'zenModalIn 0.2s ease-out' },
+        onClick: function (evt) { evt.stopPropagation(); },
+      },
+        e('div', { style: { fontSize: '2rem', marginBottom: 8 } }, ZEN_EMOJI),
+        e('h2', { style: { margin: '0 0 6px', fontSize: '1.2rem', color: '#111' } }, ZEN_APP_TITLE + ' Pro'),
+        e('p', { style: { margin: '0 0 6px', fontSize: '.72rem', color: '#7c3aed' } }, 'これまでに' + usedCount + '回ご利用いただきました'),
+        e('p', { style: { margin: '0 0 10px', fontSize: '.72rem', fontWeight: 700, color: '#4f46e5' } }, ZEN_SOCIAL_PROOF),
+        e('p', { style: { margin: '0 0 14px', fontSize: '.85rem', color: '#666' } }, 'たくさんご利用いただきありがとうございます。ここからはProで。'),
+        e('div', { style: { fontSize: '.95rem', fontWeight: 700, color: '#111', background: '#f5f3ff', borderRadius: 8, padding: 8, margin: '0 0 12px' } }, ZEN_PRICE + '（買い切り・追加課金なし）'),
+        e('p', { style: { margin: '0 0 4px', fontSize: '.72rem', fontWeight: 700, color: '#7c3aed' } }, 'Proだとこんな分析結果が見られます:'),
+        e('div', { style: { textAlign: 'left', fontSize: '.78rem', color: '#555', background: '#f5f3ff', borderRadius: 8, padding: '8px 10px', margin: '0 0 12px' } }, ZEN_TEASER),
+        e('ul', { style: { textAlign: 'left', fontSize: '.82rem', color: '#444', margin: '0 0 16px', paddingLeft: 18, listStyle: 'none' } }, featureItems),
+        e('div', { style: { fontSize: '.72rem', color: '#888', margin: '0 0 4px' } }, 'コンビニのコーヒー1杯程度で、この先ずっと使えます'),
+        e('div', { style: { fontSize: '.7rem', color: '#888', margin: '0 0 4px' } }, '一度のお支払いで永久利用可能・サブスクではありません'),
+        e('div', { style: { fontSize: '.7rem', color: '#059669', fontWeight: 600, margin: '0 0 8px' } }, '✅ 7日間全額返金保証・お気軽にお試しください'),
+        e('button', {
+          id: 'zen-paywall-buy',
+          'aria-label': ZEN_APP_TITLE + ' Proを' + ZEN_PRICE + 'で購入する',
+          disabled: props.checkoutStarted,
+          style: { width: '100%', padding: 14, border: 'none', borderRadius: 10, background: 'linear-gradient(135deg,#7c3aed,#4f46e5)', color: '#fff', fontWeight: 700, fontSize: '.95rem', cursor: props.checkoutStarted ? 'default' : 'pointer', opacity: props.checkoutStarted ? 0.85 : 1 },
+          onClick: onBuy,
+        }, props.checkoutStarted ? '読み込み中…' : '今すぐ' + ZEN_PRICE + 'で解放する（買い切り・登録不要）'),
+        e('div', { style: { fontSize: '.68rem', color: '#999', marginTop: 6 } }, '🔒 決済はStripe公式ドメイン（buy.stripe.com）が安全に処理します'),
+        e('div', { style: { fontSize: '.66rem', color: '#aaa', marginTop: 4 } }, '開発者本人が運用しています。不具合・要望はXのDMまでご連絡ください'),
+        e('button', {
+          id: 'zen-paywall-close',
+          style: { width: '100%', padding: 10, marginTop: 8, border: 'none', background: 'none', color: '#999', fontSize: '.82rem', cursor: 'pointer' },
+          onClick: handleClose,
+        }, '無料版のまま続ける')
+      )
+    );
+  };
+
   function zenLoadAll() {
     try { return JSON.parse(localStorage.getItem(ZEN_STORE_KEY) || '{}'); }
     catch (e) { return {}; }
@@ -1827,7 +1965,11 @@ function ShareBar() {
     zenSetState(s);
     window.zenUpdateRemainingBadge();
   }
-  function zenStartCheckout() {
+  // CVR-132: App()（IIFE外のトップレベルスコープ）のhandlePaywallBuy()から
+  // 呼べるよう、windowへ公開する。従来はIIFE内クロージャのみで完結して
+  // いたが、ReactコンポーネントがApp()側に状態を持つ設計にした都合上、
+  // このIIFEの外から呼び出す経路が新たに必要になった。
+  window.zenStartCheckout = function zenStartCheckout() {
     // CVR-008: モーダル表示数に対する購入ボタンクリック率を計測可能にする。
     window.dataLayer = window.dataLayer || [];
     window.dataLayer.push({ event: 'checkout_started', slug: ZEN_SLUG });
@@ -1841,110 +1983,15 @@ function ShareBar() {
     var url = ZEN_PAYMENT_LINK + (ZEN_PAYMENT_LINK.indexOf('?') >= 0 ? '&' : '?') + 'client_reference_id=' + encodeURIComponent(referenceId) + '&redirect=' + ret;
     window.location.href = url;
   }
+  // CVR-132: 旧innerHTML組み立て版zenShowPaywallを、React側(<ZenPaywallModal/>、
+  // 本ファイル上部のwindow.ZenPaywallModal参照)への薄いブリッジに置き換えた。
+  // App()コンポーネントがwindow.zenPaywallListenersを購読し、showPaywall()
+  // 呼び出しをReact stateの更新（setShowPaywallModal(true)）に変換する。
+  // グローバル関数のシグネチャ（引数なし・戻り値なし）は維持し、既存の
+  // 呼び出し側（analyze()内のzenShowPaywall()）は変更不要にしている。
+  window.zenPaywallListeners = [];
   window.zenShowPaywall = function () {
-    var existing = document.getElementById('zen-paywall-modal');
-    if (existing) existing.remove();
-
-    var previousBodyOverflow = document.body.style.overflow;
-    document.body.style.overflow = 'hidden';
-    var blockScroll = function (e) { e.preventDefault(); };
-    document.addEventListener('wheel', blockScroll, { passive: false });
-    document.addEventListener('touchmove', blockScroll, { passive: false });
-    var restoreScroll = function () {
-      document.body.style.overflow = previousBodyOverflow;
-      document.removeEventListener('wheel', blockScroll);
-      document.removeEventListener('touchmove', blockScroll);
-    };
-    window.scrollTo(0, 0);
-
-    var overlay = document.createElement('div');
-    overlay.id = 'zen-paywall-modal';
-    // CVR-018: 背景オーバーレイの不透明度を上げ、視認性を強化する。
-    overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.75);display:flex;align-items:center;justify-content:center;z-index:99999;font-family:sans-serif';
-    if (!document.getElementById('zen-modal-anim-style')) {
-      var animStyle = document.createElement('style');
-      animStyle.id = 'zen-modal-anim-style';
-      animStyle.textContent = '@keyframes zenModalIn{from{opacity:0;transform:scale(.94)}to{opacity:1;transform:scale(1)}}';
-      document.head.appendChild(animStyle);
-    }
-    // CVR-007: ペイウォール表示イベントをdataLayer（GA4想定）へ送り、
-    // 表示回数・購入率の算出を可能にする（計測基盤整備）。
-    window.dataLayer = window.dataLayer || [];
-    window.dataLayer.push({ event: 'paywall_shown', slug: ZEN_SLUG });
-    var feats = ZEN_PRO_FEATURES.map(function (f) { return '<li>✅ ' + f + '</li>'; }).join('');
-    overlay.innerHTML =
-      // CVR-026: スマートフォン実機でのタップ領域・文字間隔の窮屈さを緩和。
-      // CVR-018: フェードイン・スケールインのアニメーションで登場演出を強化。
-      '<div style="background:#fff;border-radius:16px;padding:32px 28px;max-width:380px;width:90%;text-align:center;box-shadow:0 20px 60px rgba(0,0,0,.3);animation:zenModalIn 0.2s ease-out">'
-      + '<div style="font-size:2rem;margin-bottom:8px">' + ZEN_EMOJI + '</div>'
-      + '<h2 style="margin:0 0 6px;font-size:1.2rem;color:#111">' + ZEN_APP_TITLE + ' Pro</h2>'
-      // CVR-021: 無料枠で既に得た利用実績を可視化し、「ここまで使った価値」を
-      // 実感させる。診断結果の中身（件数等）はアプリごとに構造が異なり汎用的に
-      // 取得できないため、共通で取得できる実施回数（zenState().used）を使う。
-      + '<p style="margin:0 0 6px;font-size:.72rem;color:#7c3aed">これまでに' + zenState().used + '回ご利用いただきました</p>'
-      // CVR-011: 社会的証明表示（北西大学調査でCVR最大270%向上の知見）。
-      + '<p style="margin:0 0 10px;font-size:.72rem;font-weight:700;color:#4f46e5">' + ZEN_SOCIAL_PROOF + '</p>'
-      + '<p style="margin:0 0 14px;font-size:.85rem;color:#666">たくさんご利用いただきありがとうございます。ここからはProで。</p>'
-      // CVR-001: 価格を機能リストより前に早期表示し、価格の透明性を高める。
-      + '<div style="font-size:.95rem;font-weight:700;color:#111;background:#f5f3ff;border-radius:8px;padding:8px;margin:0 0 12px">' + ZEN_PRICE + '（買い切り・追加課金なし）</div>'
-      + '<p style="margin:0 0 4px;font-size:.72rem;font-weight:700;color:#7c3aed">Proだとこんな分析結果が見られます:</p>'
-      + '<div style="text-align:left;font-size:.78rem;color:#555;background:#f5f3ff;border-radius:8px;padding:8px 10px;margin:0 0 12px">' + ZEN_TEASER + '</div>'
-      // CVR-010: 機能リストの各項目先頭にチェックマークを付与（視覚的差別化）。
-      + '<ul style="text-align:left;font-size:.82rem;color:#444;margin:0 0 16px;padding-left:18px;list-style:none">' + feats + '</ul>'
-      + '<div style="font-size:.72rem;color:#888;margin:0 0 4px">コンビニのコーヒー1杯程度で、この先ずっと使えます</div>'
-      // CVR-015: 課金形態（買い切り・サブスクではない）の誤解防止注記。
-      + '<div style="font-size:.7rem;color:#888;margin:0 0 4px">一度のお支払いで永久利用可能・サブスクではありません</div>'
-      // 2026-09-03（購入0件打開タスクC#16/CVR-089）: 初回購入への心理的
-      // ハードコード（実績ゼロで不安）を下げるため、返金保証を明記する。
-      // 自動返金の仕組みは無く、実際にリクエストが来た場合はStripe
-      // ダッシュボードから手動で返金処理する運用（ユーザー承認済み）。
-      + '<div style="font-size:.7rem;color:#059669;font-weight:600;margin:0 0 8px">✅ 7日間全額返金保証・お気軽にお試しください</div>'
-      + '<button id="zen-paywall-buy" aria-label="' + ZEN_APP_TITLE + ' Proを' + ZEN_PRICE + 'で購入する" style="width:100%;padding:14px;border:none;border-radius:10px;background:linear-gradient(135deg,#7c3aed,#4f46e5);color:#fff;font-weight:700;font-size:.95rem;cursor:pointer;transition:transform .15s,box-shadow .15s" onmouseover="this.style.transform=\'scale(1.03)\';this.style.boxShadow=\'0 6px 20px rgba(124,58,237,.4)\'" onmouseout="this.style.transform=\'scale(1)\';this.style.boxShadow=\'none\'">今すぐ' + ZEN_PRICE + 'で解放する（買い切り・登録不要）</button>'
-      // CVR-003/024: 決済先（Stripe公式ドメイン）への信頼性シグナルを
-      // 購入ボタン直下に明示し、フィッシング懸念による離脱を防ぐ。
-      + '<div style="font-size:.68rem;color:#999;margin-top:6px">🔒 決済はStripe公式ドメイン（buy.stripe.com）が安全に処理します</div>'
-      // 2026-09-03（購入0件打開タスクC#17/CVR-088）: 実績ゼロによる不安を
-      // 補うため、開発者の透明性訴求（個人開発である旨と連絡先）を追加。
-      + '<div style="font-size:.66rem;color:#aaa;margin-top:4px">開発者本人が運用しています。不具合・要望はXのDMまでご連絡ください</div>'
-      + '<button id="zen-paywall-close" style="width:100%;padding:10px;margin-top:8px;border:none;background:none;color:#999;font-size:.82rem;cursor:pointer">無料版のまま続ける</button>'
-      + '</div>';
-    document.body.appendChild(overlay);
-    var buyBtn = overlay.querySelector('#zen-paywall-buy');
-    var closeBtn = overlay.querySelector('#zen-paywall-close');
-    var closeModal = function () {
-      // CVR-006: 「あとで」離脱理由をlocalStorageへタイムスタンプ付きで記録し、
-      // 離脱率計測の土台とする。
-      try {
-        var log = JSON.parse(localStorage.getItem('zen-paywall-dismiss-log') || '[]');
-        log.push({ slug: ZEN_SLUG, at: new Date().toISOString() });
-        localStorage.setItem('zen-paywall-dismiss-log', JSON.stringify(log));
-      } catch (e) {}
-      restoreScroll(); document.removeEventListener('keydown', onKeydown); overlay.remove();
-    };
-    var onKeydown = function (e) {
-      if (e.key === 'Escape') { closeModal(); return; }
-      if (e.key === 'Tab') {
-        // 2026-08-25（CVR-035、キーボード操作対応）: モーダル内の2ボタン間で
-        // フォーカスを循環させ、背後のページ要素にTabで抜けられないようにする。
-        e.preventDefault();
-        var active = document.activeElement;
-        (active === buyBtn ? closeBtn : buyBtn).focus();
-      }
-    };
-    document.addEventListener('keydown', onKeydown);
-    buyBtn.focus();
-    // CVR-014: クリック後の反応がないことによる二重クリック・離脱を防ぐため、
-    // Stripe遷移までの間ボタン表示を「読み込み中…」に切り替える。
-    buyBtn.onclick = function () {
-      buyBtn.disabled = true;
-      buyBtn.textContent = '読み込み中…';
-      zenStartCheckout();
-    };
-    closeBtn.onclick = closeModal;
-    // CVR-012: モーダル本体クリックでの伝播停止を明示し、誤操作による
-    // 意図しない離脱を防ぐ（overlay.onclickのtarget===overlay判定と合わせ二重化）。
-    overlay.firstElementChild.onclick = function (e) { e.stopPropagation(); };
-    overlay.onclick = function (e) { if (e.target === overlay) closeModal(); };
+    window.zenPaywallListeners.forEach(function (fn) { fn(); });
   };
 
   zenCheckPurchaseReturn();
