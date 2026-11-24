@@ -801,7 +801,7 @@ function App() {
   } : x));
   const analyze = async () => {
     if (!pro && !zenCanUse()) { zenShowPaywall(); return; }
-    if (!pro) { zenRecordUse(); setPro(zenIsPro()); window.zenMaybeWarnFreeLimit(); window.zenMaybeShowUpsellHint(); window.zenUpdateRemainingBadge(); }
+    if (!pro) { window.zenShowPreCountToast(); zenRecordUse(); setPro(zenIsPro()); window.zenMaybeWarnFreeLimit(); window.zenMaybeShowUpsellHint(); window.zenUpdateRemainingBadge(); }
     setBusy(true);
     setErr("");
     try {
@@ -1913,6 +1913,28 @@ function ShareBar() {
   window.zenCanUse = function () { return window.zenIsPro() || zenState().used < ZEN_FREE_LIMIT; };
   window.zenRemaining = function () {
     return window.zenIsPro() ? Infinity : Math.max(0, ZEN_FREE_LIMIT - zenState().used);
+  };
+  /** 無料枠カウント処理の直前に、消費前の残り回数をトーストで知らせる（CVR-131）。
+   * zenRecordUse()より先に呼ぶことで「静かにインクリメント」を防ぎ、ユーザーが
+   * 何回消費したか把握できないまま使い切ってしまう体験を避ける。確認や承諾は
+   * 求めず、解析フローはブロックしない（通知のみ）。 */
+  window.zenShowPreCountToast = function () {
+    if (window.zenIsPro()) return;
+    var remaining = window.zenRemaining();
+    var existing = document.getElementById('zen-precount-toast');
+    if (existing) existing.remove();
+    var toast = document.createElement('div');
+    toast.id = 'zen-precount-toast';
+    toast.style.cssText =
+      // bottom:72px — 同時に発火しうる zen-warn-toast / zen-upsell-hint（共に bottom:24px）
+      // と縦に重ならないよう、その上段に配置する。
+      'position:fixed;left:50%;bottom:72px;transform:translateX(-50%);z-index:99998;' +
+      'background:#eef2ff;border:1px solid #c7d2fe;color:#3730a3;font-size:.8rem;' +
+      'padding:8px 16px;border-radius:999px;box-shadow:0 4px 16px rgba(0,0,0,.15);' +
+      'font-family:sans-serif;white-space:nowrap';
+    toast.textContent = '🆓 残り' + remaining + '回無料で使えます';
+    document.body.appendChild(toast);
+    setTimeout(function () { if (toast.parentNode) toast.remove(); }, 3000);
   };
   window.zenRecordUse = function () {
     if (window.zenIsPro()) return;
