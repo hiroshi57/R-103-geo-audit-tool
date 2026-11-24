@@ -905,7 +905,23 @@ function App() {
     className: "primary",
     disabled: busy,
     onClick: analyze
-  }, busy ? "解析中…（数秒）" : "解析する"), /*#__PURE__*/React.createElement("button", {
+  }, busy ? "解析中…（数秒）" : "解析する"),
+  // CVR-137: 無料枠が残り1回のときだけ、解析ボタンのすぐそばに常時バッジで
+  // 予告する。CVR-041（残り1回になった直後の一時的な画面下部トースト）とは
+  // 表示場所・持続性が異なる別の訴求として共存させる。
+  !pro && window.zenRemaining && window.zenRemaining() === 1 && /*#__PURE__*/React.createElement("span", {
+    style: {
+      display: "inline-block",
+      marginLeft: 8,
+      background: "#fff4e0",
+      border: "1px solid #f0d98a",
+      color: "#8a6100",
+      fontSize: 12,
+      fontWeight: 700,
+      padding: "4px 10px",
+      borderRadius: 999
+    }
+  }, "⏳ 次回で無料枠終了"), /*#__PURE__*/React.createElement("button", {
     className: "ghost",
     onClick: () => {
       upd(0, "url", "https://digitalidentity.co.jp/");
