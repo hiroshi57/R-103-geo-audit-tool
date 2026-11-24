@@ -541,6 +541,17 @@ function level(t) {
   return t >= 80 ? ["優秀", "#0f7a54"] : t >= 60 ? ["良好", "#17a673"] : t >= 40 ? ["標準", "#f0a500"] : ["要改善", "#e0533b"];
 }
 
+// CVR-136: 解析結果表示直後の「aha moment」要約バナー用。
+// 各因子が満点の半分未満（＝明確な伸びしろ）の件数を「改善ポイント」として
+// カウントし、結果エリア最上部で1行の要約として強調表示する。
+function ahaSummary(own) {
+  const weakCount = own.f.filter(x => x.s < x.max / 2).length;
+  if (weakCount === 0) {
+    return `${own.total}点／100点中。7項目すべて基準を満たしています`;
+  }
+  return `${own.total}点／100点中。改善ポイントが${weakCount}件見つかりました`;
+}
+
 // 7軸レーダーチャート(自社＋競合オーバーレイ)
 function Radar({
   own,
@@ -905,7 +916,20 @@ function App() {
     style: {
       marginTop: 8
     }
-  }, err)), own && (own.textLen < 1500 || own.f[1].s <= 4) && /*#__PURE__*/React.createElement("div", {
+  }, err)), own && /*#__PURE__*/React.createElement("div", {
+    // CVR-136: 解析結果の最上部に「aha moment」要約バナーを表示し、
+    // 価値をスコアカード（総合GEOスコア）より先に一目で把握できるようにする。
+    style: {
+      background: "linear-gradient(135deg,#eef2ff,#f5f3ff)",
+      border: "1px solid #c7d2fe",
+      borderRadius: 10,
+      padding: "10px 14px",
+      marginBottom: 10,
+      fontSize: 14,
+      fontWeight: 700,
+      color: "#3730a3"
+    }
+  }, "💡 " + ahaSummary(own)), own && (own.textLen < 1500 || own.f[1].s <= 4) && /*#__PURE__*/React.createElement("div", {
     className: "card"
   }, /*#__PURE__*/React.createElement("div", {
     style: {
